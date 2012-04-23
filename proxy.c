@@ -19,8 +19,7 @@ void clienterror(int fd, char *cause, char *errnum,
 void get_header_info(int fd, char *method, char *uri, 
 	char *version, char *host);
 
-int main(int argc, char **argv)
-{
+int main(int argc, char **argv){
     printf("%s%s%sport:%s \n", user_agent, accept_line, accept_encoding, argv[1]);
     int listenfd, connfd, port, clientlen;
     struct sockaddr_in clientaddr;
@@ -34,12 +33,11 @@ int main(int argc, char **argv)
 
     listenfd = Open_listenfd(port);
     while (1) {
-
 		clientlen = sizeof(clientaddr);
 		connfd = Accept(listenfd, (SA *)&clientaddr, &clientlen);
 		char host[MAXLINE], method[MAXLINE], uri[MAXLINE], version[MAXLINE];
 		get_header_info(connfd, method, uri, version, host);
-		doit(connfd, method, uri, version, host);
+        doit(connfd, method, uri, version, host);
 		Close(connfd);
     }
     return 0;
@@ -102,7 +100,7 @@ void doit(int fd, char *method, char *uri, char *version, char *host)
     int is_static;
     struct stat sbuf;
     char filename[MAXLINE], cgiargs[MAXLINE];
-    rio_t rio;
+
     
            //line:netp:doit:parserequest
     if (strcasecmp(method, "GET")) {                     //line:netp:doit:beginrequesterr
@@ -115,18 +113,19 @@ void doit(int fd, char *method, char *uri, char *version, char *host)
     /* Parse URI from GET request */
     is_static = parse_uri(uri, filename, cgiargs);       //line:netp:doit:staticcheck
     if (stat(filename, &sbuf) < 0) {                     //line:netp:doit:beginnotfound
-	clienterror(fd, filename, "404", "Not found",
-		    "Tiny couldn't find this file");
-	return;
+    	clienterror(fd, filename, "404", "Not found",
+    		    "Tiny couldn't find this file");
+    	return;
     }                                                    //line:netp:doit:endnotfound
 
     if (is_static) { /* Serve static content */          
-	if (!(S_ISREG(sbuf.st_mode)) || !(S_IRUSR & sbuf.st_mode)) { //line:netp:doit:readable
-	    clienterror(fd, filename, "403", "Forbidden",
-			"Tiny couldn't read the file");
-	    return;
-	}
-	serve_static(fd, filename, sbuf.st_size);        //line:netp:doit:servestatic
+    	if (!(S_ISREG(sbuf.st_mode)) || !(S_IRUSR & sbuf.st_mode)) { //line:netp:doit:readable
+    	    clienterror(fd, filename, "403", "Forbidden",
+    			"Tiny couldn't read the file");
+    	    return;
+    	}
+        printf("sldfjsdlkfjdfsl\n");
+    	serve_static(fd, filename, sbuf.st_size);        //line:netp:doit:servestatic
     }
     else { /* Serve dynamic content */
 	if (!(S_ISREG(sbuf.st_mode)) || !(S_IXUSR & sbuf.st_mode)) { //line:netp:doit:executable

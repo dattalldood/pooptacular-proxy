@@ -22,7 +22,8 @@ void get_header_info(int fd, char *method, char *uri,
 
 int main(int argc, char **argv){
     printf("%s%s%sport:%s \n", user_agent, accept_line, accept_encoding, argv[1]);
-    int listenfd, connfd, port, clientlen;
+    int listenfd, connfd, port;
+    socklen_t clientlen;
     struct sockaddr_in clientaddr;
 
     if (argc != 2) {

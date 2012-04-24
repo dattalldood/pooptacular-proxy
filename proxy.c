@@ -9,16 +9,15 @@ static const char *user_agent = "User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:
 static const char *accept_line = "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8\r\n";
 static const char *accept_encoding = "Accept-Encoding: gzip, deflate\r\n";
 
-void doit(int fd, char *method, char *uri, char *version, char *host);
 void read_requesthdrs(rio_t *rp);
-int parse_uri(char *uri, char *filename, char *cgiargs, int *port);
+void parse_uri(char *uri, char *filename, char *host, int *port);
 void serve_static(int fd, char *filename, int filesize);
 void get_filetype(char *filename, char *filetype);
-void serve_dynamic(int fd, char *filename, char *cgiargs);
 void clienterror(int fd, char *cause, char *errnum, 
 	char *shortmsg, char *longmsg);
 void get_header_info(int fd, char *method, char *uri, 
 	char *version, char *host);
+int is_valid_method(int fd, char *method);
 
 int main(int argc, char **argv){
     printf("%s%s%sport:%s \n", user_agent, accept_line, accept_encoding, argv[1]);
@@ -37,12 +36,27 @@ int main(int argc, char **argv){
     while (1) {
 		clientlen = sizeof(clientaddr);
 		connfd = Accept(listenfd, (SA *)&clientaddr, &clientlen);
-		char host[MAXLINE], method[MAXLINE], uri[MAXLINE], version[MAXLINE];
+		char host[MAXLINE+1], method[MAXLINE], uri[MAXLINE], version[MAXLINE], filename[MAXLINE];
+        int port = 0;
 		get_header_info(connfd, method, uri, version, host);
-        doit(connfd, method, uri, version, host);
-		Close(connfd);
+        if (!is_valid_method(connfd, method)){
+            Close(connfd);
+        }
+        else {
+            parse_uri(uri, filename, host, &port);  
+    		Close(connfd);
+        }
     }
     return 0;
+}
+
+int is_valid_method(int fd, char *method){
+    if (strcasecmp(method, "GET")) {
+       clienterror(fd, method, "501", "Not Implemented",
+                "Tiny does not implement this method");
+        return 0;
+    }
+    return 1;
 }
 
 void get_header_info(int fd, char *method, char *uri, char *version, char *host){
@@ -68,122 +82,40 @@ void get_header_info(int fd, char *method, char *uri, char *version, char *host)
     }
 }
 
-
-/*
- * doit - handle one HTTP request/response transaction
- */
-/* $begin doit */
-void doit(int fd, char *method, char *uri, char *version, char *host) 
-{
-    int is_static;
-    int port = 0;
-    struct stat sbuf;
-    char filename[MAXLINE], cgiargs[MAXLINE];
-
-    if (strcasecmp(method, "GET")) {
-       clienterror(fd, method, "501", "Not Implemented",
-                "Tiny does not implement this method");
-        return;
-    }                               
-    //read_requesthdrs(&rio);                              //line:netp:doit:readrequesthdrs
-
-    /* Parse URI from GET request */
-    is_static = parse_uri(uri, filename, cgiargs, &port);       //line:netp:doit:staticcheck
-    printf("%s\n", filename);
-    assert(0);
-    if (stat(filename, &sbuf) < 0) {                     //line:netp:doit:beginnotfound
-    	clienterror(fd, filename, "404", "Not found",
-    		    "Tiny couldn't find this file");
-    	return;
-    }                                                    //line:netp:doit:endnotfound
-
-    if (is_static) { /* Serve static content */          
-    	if (!(S_ISREG(sbuf.st_mode)) || !(S_IRUSR & sbuf.st_mode)) { //line:netp:doit:readable
-    	    clienterror(fd, filename, "403", "Forbidden",
-    			"Tiny couldn't read the file");
-    	    return;
-    	}
-        printf("sldfjsdlkfjdfsl\n");
-    	serve_static(fd, filename, sbuf.st_size);        //line:netp:doit:servestatic
-    }
-    else { /* Serve dynamic content */
-	if (!(S_ISREG(sbuf.st_mode)) || !(S_IXUSR & sbuf.st_mode)) { //line:netp:doit:executable
-	    clienterror(fd, filename, "403", "Forbidden",
-			"Tiny couldn't run the CGI program");
-	    return;
-	}
-	serve_dynamic(fd, filename, cgiargs);            //line:netp:doit:servedynamic
-    }
-}
-
-/*
- * read_requesthdrs - read and parse HTTP request headers
- */
-
-void read_requesthdrs(rio_t *rp) 
-{
-    char buf[MAXLINE];
-
-    Rio_readlineb(rp, buf, MAXLINE);
-    while(strcmp(buf, "\r\n")) {          //line:netp:readhdrs:checkterm
-	Rio_readlineb(rp, buf, MAXLINE);
-	printf("%s", buf);
-    }
-    return;
-}
-/* $end read_requesthdrs */
-
 /*
  * parse_uri - parse URI into filename and CGI args
  * return 0 if dynamic content, 1 if static
  */
-int parse_uri(char *uri, char *filename, char *cgiargs, int *port) 
+
+void parse_uri(char *uri, char *filename, char *host, int *port) 
 {
     char *ptr;
     int httplength = 7;
+    strcpy(filename, ".");
 
-    if (!strstr(uri, "cgi-bin")) {  /* Static content */ //line:netp:parseuri:isstatic
-    	strcpy(cgiargs, "");  
-    	char hostname[MAXLINE+1];
-        char filename[MAXLINE];
-        strcpy(filename, ".");
+    if (uri == strstr(uri, "http://")){
+        //if http (ie. http://google.com:80/index)
+        char *pathStart = index(&uri[httplength], '/');
+        strncpy(filename, pathStart, MAXLINE);
+        strncpy(host, &uri[httplength], pathStart-&uri[httplength]);
+        strcat(host, ""); //to put null character at end
+    }
+    else {
+        // if no http (ie. google.com:80/index)
+        char *pathStart = index(uri, '/');
+        strncpy(filename, pathStart, MAXLINE);
+        strncpy(host, uri, pathStart-uri);
+    }
 
-        if (uri == strstr(uri, "http://")){
-            //if http is at the start of the uri
-            char *pathStart = index(&uri[httplength], '/');
-            strncpy(filename, pathStart, MAXLINE);
-            strncpy(hostname, &uri[httplength], pathStart-&uri[httplength]);
-            strcat(hostname, ""); //to put null character at end
-        }
-        else {
-            // if no http
-            strncpy(hostname, "", 1);
-            strncpy(filename, uri, MAXLINE);
-        }
-        if ((ptr = index(hostname, ':')) != NULL){
-            //if there is a port specified
-            char portString[100];
-            strncpy(portString, ptr+1, 100);
-            *port = atoi(portString);
-            ptr[0] = '\0';
-        }
-    	 
-        printf("hostname: %s, filename: %s, port: %d\n",hostname, filename, *port);
-    	return 1;
+    if ((ptr = index(host, ':')) != NULL){
+        //if there is a port specified
+        char portString[100];
+        strncpy(portString, ptr+1, 100);
+        *port = atoi(portString);
+        ptr[0] = '\0';
     }
-    else {  /* dynamic content */                        //line:netp:parseuri:isdynamic
-    	ptr = index(uri, '?');                           //line:netp:parseuri:beginextract
-    	if (ptr) {
-    	    strcpy(cgiargs, ptr+1);
-    	    *ptr = '\0';
-    	}
-    	else{ 
-    	    strcpy(cgiargs, "");                         //line:netp:parseuri:endextract
-        }
-    	strcpy(filename, ".");                           //line:netp:parseuri:beginconvert2
-    	strcat(filename, uri);                           //line:netp:parseuri:endconvert2
-    	return 0;
-    }
+	 
+    printf("host: %s, filename: %s, port: %d\n",host, filename, *port);
 }
 /* $end parse_uri */
 
@@ -226,31 +158,6 @@ void get_filetype(char *filename, char *filetype)
     else
 	strcpy(filetype, "text/plain");
 }  
-/* $end serve_static */
-
-/*
- * serve_dynamic - run a CGI program on behalf of the client
- */
-/* $begin serve_dynamic */
-void serve_dynamic(int fd, char *filename, char *cgiargs) 
-{
-    char buf[MAXLINE], *emptylist[] = { NULL };
-
-    /* Return first part of HTTP response */
-    sprintf(buf, "HTTP/1.0 200 OK\r\n"); 
-    Rio_writen(fd, buf, strlen(buf));
-    sprintf(buf, "Server: Tiny Web Server\r\n");
-    Rio_writen(fd, buf, strlen(buf));
-  
-    if (Fork() == 0) { /* child */ //line:netp:servedynamic:fork
-	/* Real server would set all CGI vars here */
-	setenv("QUERY_STRING", cgiargs, 1); //line:netp:servedynamic:setenv
-	Dup2(fd, STDOUT_FILENO);         /* Redirect stdout to client */ //line:netp:servedynamic:dup2
-	Execve(filename, emptylist, environ); /* Run CGI program */ //line:netp:servedynamic:execve
-    }
-    Wait(NULL); /* Parent waits for and reaps child */ //line:netp:servedynamic:wait
-}
-/* $end serve_dynamic */
 
 /*
  * clienterror - returns an error message to the client

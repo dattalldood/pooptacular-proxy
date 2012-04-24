@@ -15,13 +15,14 @@ void serve_static(int fd, char *filename, int filesize);
 void get_filetype(char *filename, char *filetype);
 void clienterror(int fd, char *cause, char *errnum, 
 	char *shortmsg, char *longmsg);
-void get_header_info(int fd, char *method, char *uri, 
-	char *version, char *host);
+void get_header_info(int fd, char *method, char *version, char *host, 
+    char *filename, int *port, char *request_buffer);
 int is_valid_method(int fd, char *method);
+void send_request_to_server(char *host, int port, char *request_buffer, int serverfd);
 
 int main(int argc, char **argv){
     printf("%s%s%sport:%s \n", user_agent, accept_line, accept_encoding, argv[1]);
-    int listenfd, connfd, port;
+    int listenfd, port;
     socklen_t clientlen;
     struct sockaddr_in clientaddr;
 
@@ -31,21 +32,33 @@ int main(int argc, char **argv){
     }
     port = atoi(argv[1]);
     
-
     listenfd = Open_listenfd(port);
     while (1) {
+        int connfd, serverfd;
+
 		clientlen = sizeof(clientaddr);
 		connfd = Accept(listenfd, (SA *)&clientaddr, &clientlen);
-		char host[MAXLINE+1], method[MAXLINE], uri[MAXLINE], version[MAXLINE], filename[MAXLINE];
-        int port = 0;
-		get_header_info(connfd, method, uri, version, host);
-        if (!is_valid_method(connfd, method)){
-            Close(connfd);
+		char host[MAXLINE+1], method[MAXLINE];
+        char version[MAXLINE], filename[MAXLINE];
+        int port = 80;
+        char request_buffer[MAXLINE*100];
+		get_header_info(connfd, method, version, host, filename, &port, request_buffer);
+        if (is_valid_method(connfd, method)){
+            printf("connecting to: %s on port %d\n", host, port);
+            serverfd = Open_clientfd(host, port);
+
+            printf("request buffer\n%s\n", request_buffer);
+            send_request_to_server(host, port, request_buffer, serverfd);
+            char responsebuf[MAXLINE*100];
+            printf("--------------------\n");
+            rio_readn(serverfd, responsebuf, MAXLINE*100);
+            printf("%s\n", responsebuf);
+            Rio_writen(connfd, responsebuf, strlen(responsebuf));
+            printf("==========================================================\n");
+            Close(serverfd);
         }
-        else {
-            parse_uri(uri, filename, host, &port);  
-    		Close(connfd);
-        }
+
+        Close(connfd);
     }
     return 0;
 }
@@ -59,27 +72,45 @@ int is_valid_method(int fd, char *method){
     return 1;
 }
 
-void get_header_info(int fd, char *method, char *uri, char *version, char *host){
-    char buf[MAXLINE];
+void get_header_info(int fd, char *method, char *version, char *host, char *filename, int *port, char *request_buffer){
+    char buf[MAXLINE], uri[MAXLINE];
     rio_t rio;
 	Rio_readinitb(&rio, fd);
 	Rio_readlineb(&rio, buf, MAXLINE);
 	//reads the first line to get request line
 	sscanf(buf, "%s %s %s", method, uri, version);
+    parse_uri(uri, filename, host, port);
+    //add default HTTP request info
+    strncpy(request_buffer, buf, MAXLINE);
+    strcat(request_buffer, "Host: ");
+    strcat(request_buffer, host);
+    strcat(request_buffer, "\n");
+    strcat(request_buffer, user_agent);
+    strcat(request_buffer, accept_line);
+    strcat(request_buffer, accept_encoding);
     /* Read headers */
     while (1){
     	Rio_readinitb(&rio, fd);
 	    Rio_readlineb(&rio, buf, MAXLINE);
 	    if (!strcmp(buf,"\r\n")) break;
-    	printf("reading line: %s",buf);
     	char key[MAXLINE], value[MAXLINE];
     	sscanf(buf, "%s %s", key, value);
     	// extract the host 
     	if (!strcmp(key, "Host:")){
     		strncpy(host, value, MAXLINE);
     		printf("  host: %s\n\n", host);
+            strcat(request_buffer, buf);
     	}
+        else if (strcmp(key, "User-Agent:") && strcmp(key, "Accept:") && strcmp(key, "Accept-Encoding:")){
+            //if key isnt user-agent, accept, or accept-encoding
+            strcat(request_buffer, buf);
+        }
     }
+    strcat(request_buffer, "\r\n");
+}
+
+void send_request_to_server(char *host, int port, char *request_buffer, int serverfd){
+    Rio_writen(serverfd, request_buffer, strlen(request_buffer));
 }
 
 /*
@@ -91,20 +122,32 @@ void parse_uri(char *uri, char *filename, char *host, int *port)
 {
     char *ptr;
     int httplength = 7;
-    strcpy(filename, ".");
 
     if (uri == strstr(uri, "http://")){
         //if http (ie. http://google.com:80/index)
         char *pathStart = index(&uri[httplength], '/');
-        strncpy(filename, pathStart, MAXLINE);
-        strncpy(host, &uri[httplength], pathStart-&uri[httplength]);
+        if (pathStart == NULL){
+            strncpy(filename, "/", 2);
+            strncpy(host, &uri[httplength], MAXLINE);
+        }
+        else {
+            strncpy(filename, pathStart, MAXLINE);    
+            strncpy(host, &uri[httplength], pathStart-&uri[httplength]);
+        }
+        
         strcat(host, ""); //to put null character at end
     }
     else {
         // if no http (ie. google.com:80/index)
         char *pathStart = index(uri, '/');
-        strncpy(filename, pathStart, MAXLINE);
-        strncpy(host, uri, pathStart-uri);
+        if (pathStart == NULL){
+            strncpy(filename, "/", 2);
+            strncpy(host, uri, MAXLINE);
+        }
+        else {
+            strncpy(filename, pathStart, MAXLINE);
+            strncpy(host, uri, pathStart-uri);
+        }
     }
 
     if ((ptr = index(host, ':')) != NULL){

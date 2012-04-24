@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include "csapp.h"
+#include <assert.h>
 
 #define MAX_CACHE_SIZE 1049000
 #define MAX_OBJECT_SIZE 102400
@@ -10,7 +11,7 @@ static const char *accept_encoding = "Accept-Encoding: gzip, deflate\r\n";
 
 void doit(int fd, char *method, char *uri, char *version, char *host);
 void read_requesthdrs(rio_t *rp);
-int parse_uri(char *uri, char *filename, char *cgiargs);
+int parse_uri(char *uri, char *filename, char *cgiargs, int *port);
 void serve_static(int fd, char *filename, int filesize);
 void get_filetype(char *filename, char *filetype);
 void serve_dynamic(int fd, char *filename, char *cgiargs);
@@ -73,45 +74,22 @@ void get_header_info(int fd, char *method, char *uri, char *version, char *host)
 /* $begin doit */
 void doit(int fd, char *method, char *uri, char *version, char *host) 
 {
-    /*int is_static;
-    struct stat sbuf;
-    char buf[MAXLINE], method[MAXLINE], uri[MAXLINE], version[MAXLINE];
-    char host[MAXLINE];
-    char filename[MAXLINE], cgiargs[MAXLINE];
-    rio_t rio;
-	Rio_readinitb(&rio, fd);
-	Rio_readlineb(&rio, buf, MAXLINE);
-	//reads the first line to get request line
-	sscanf(buf, "%s %s %s", method, uri, version);
-    
-    while (!strcmp(buf,"\r\n")){
-    	Rio_readinitb(&rio, fd);
-	    Rio_readlineb(&rio, buf, MAXLINE);
-    	printf("reading line: %s",buf);
-    	char key[MAXLINE], value[MAXLINE];
-    	sscanf(buf, "%s %s", key, value);
-    	// extract the host 
-    	if (!strcmp(key, "Host:")){
-    		strncpy(host, value, MAXLINE);
-    		printf("  host: %s\n\n", host);
-    	}
-    }
-    */
     int is_static;
+    int port = 0;
     struct stat sbuf;
     char filename[MAXLINE], cgiargs[MAXLINE];
 
-    
-           //line:netp:doit:parserequest
-    if (strcasecmp(method, "GET")) {                     //line:netp:doit:beginrequesterr
+    if (strcasecmp(method, "GET")) {
        clienterror(fd, method, "501", "Not Implemented",
                 "Tiny does not implement this method");
         return;
-    }                                                    //line:netp:doit:endrequesterr
+    }                               
     //read_requesthdrs(&rio);                              //line:netp:doit:readrequesthdrs
 
     /* Parse URI from GET request */
-    is_static = parse_uri(uri, filename, cgiargs);       //line:netp:doit:staticcheck
+    is_static = parse_uri(uri, filename, cgiargs, &port);       //line:netp:doit:staticcheck
+    printf("%s\n", filename);
+    assert(0);
     if (stat(filename, &sbuf) < 0) {                     //line:netp:doit:beginnotfound
     	clienterror(fd, filename, "404", "Not found",
     		    "Tiny couldn't find this file");
@@ -136,12 +114,11 @@ void doit(int fd, char *method, char *uri, char *version, char *host)
 	serve_dynamic(fd, filename, cgiargs);            //line:netp:doit:servedynamic
     }
 }
-/* $end doit */
 
 /*
  * read_requesthdrs - read and parse HTTP request headers
  */
-/* $begin read_requesthdrs */
+
 void read_requesthdrs(rio_t *rp) 
 {
     char buf[MAXLINE];
@@ -157,32 +134,54 @@ void read_requesthdrs(rio_t *rp)
 
 /*
  * parse_uri - parse URI into filename and CGI args
- *             return 0 if dynamic content, 1 if static
+ * return 0 if dynamic content, 1 if static
  */
-/* $begin parse_uri */
-int parse_uri(char *uri, char *filename, char *cgiargs) 
+int parse_uri(char *uri, char *filename, char *cgiargs, int *port) 
 {
     char *ptr;
+    int httplength = 7;
 
     if (!strstr(uri, "cgi-bin")) {  /* Static content */ //line:netp:parseuri:isstatic
-	strcpy(cgiargs, "");                             //line:netp:parseuri:clearcgi
-	strcpy(filename, ".");                           //line:netp:parseuri:beginconvert1
-	strcat(filename, uri);                           //line:netp:parseuri:endconvert1
-	if (uri[strlen(uri)-1] == '/')                   //line:netp:parseuri:slashcheck
-	    strcat(filename, "home.html");               //line:netp:parseuri:appenddefault
-	return 1;
+    	strcpy(cgiargs, "");  
+    	char hostname[MAXLINE+1];
+        char filename[MAXLINE];
+        strcpy(filename, ".");
+
+        if (uri == strstr(uri, "http://")){
+            //if http is at the start of the uri
+            char *pathStart = index(&uri[httplength], '/');
+            strncpy(filename, pathStart, MAXLINE);
+            strncpy(hostname, &uri[httplength], pathStart-&uri[httplength]);
+            strcat(hostname, ""); //to put null character at end
+        }
+        else {
+            // if no http
+            strncpy(hostname, "", 1);
+            strncpy(filename, uri, MAXLINE);
+        }
+        if ((ptr = index(hostname, ':')) != NULL){
+            //if there is a port specified
+            char portString[100];
+            strncpy(portString, ptr+1, 100);
+            *port = atoi(portString);
+            ptr[0] = '\0';
+        }
+    	 
+        printf("hostname: %s, filename: %s, port: %d\n",hostname, filename, *port);
+    	return 1;
     }
-    else {  /* Dynamic content */                        //line:netp:parseuri:isdynamic
-	ptr = index(uri, '?');                           //line:netp:parseuri:beginextract
-	if (ptr) {
-	    strcpy(cgiargs, ptr+1);
-	    *ptr = '\0';
-	}
-	else 
-	    strcpy(cgiargs, "");                         //line:netp:parseuri:endextract
-	strcpy(filename, ".");                           //line:netp:parseuri:beginconvert2
-	strcat(filename, uri);                           //line:netp:parseuri:endconvert2
-	return 0;
+    else {  /* dynamic content */                        //line:netp:parseuri:isdynamic
+    	ptr = index(uri, '?');                           //line:netp:parseuri:beginextract
+    	if (ptr) {
+    	    strcpy(cgiargs, ptr+1);
+    	    *ptr = '\0';
+    	}
+    	else{ 
+    	    strcpy(cgiargs, "");                         //line:netp:parseuri:endextract
+        }
+    	strcpy(filename, ".");                           //line:netp:parseuri:beginconvert2
+    	strcat(filename, uri);                           //line:netp:parseuri:endconvert2
+    	return 0;
     }
 }
 /* $end parse_uri */
@@ -205,11 +204,11 @@ void serve_static(int fd, char *filename, int filesize)
     Rio_writen(fd, buf, strlen(buf));       //line:netp:servestatic:endserve
 
     /* Send response body to client */
-    srcfd = Open(filename, O_RDONLY, 0);    //line:netp:servestatic:open
-    srcp = Mmap(0, filesize, PROT_READ, MAP_PRIVATE, srcfd, 0);//line:netp:servestatic:mmap
-    Close(srcfd);                           //line:netp:servestatic:close
-    Rio_writen(fd, srcp, filesize);         //line:netp:servestatic:write
-    Munmap(srcp, filesize);                 //line:netp:servestatic:munmap
+    srcfd = Open(filename, O_RDONLY, 0);    
+    srcp = Mmap(0, filesize, PROT_READ, MAP_PRIVATE, srcfd, 0);
+    Close(srcfd);       
+    Rio_writen(fd, srcp, filesize);  
+    Munmap(srcp, filesize);          
 }
 
 /*

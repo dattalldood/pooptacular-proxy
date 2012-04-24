@@ -11,10 +11,9 @@ static const char *accept_encoding = "Accept-Encoding: gzip, deflate\r\n";
 
 void doit(int fd, char *method, char *uri, char *version, char *host);
 void read_requesthdrs(rio_t *rp);
-int parse_uri(char *uri, char *filename, char *cgiargs, int *port);
+void parse_uri(char *uri, char *filename, char *host, int *port);
 void serve_static(int fd, char *filename, int filesize);
 void get_filetype(char *filename, char *filetype);
-void serve_dynamic(int fd, char *filename, char *cgiargs);
 void clienterror(int fd, char *cause, char *errnum, 
 	char *shortmsg, char *longmsg);
 void get_header_info(int fd, char *method, char *uri, 
@@ -37,7 +36,7 @@ int main(int argc, char **argv){
     while (1) {
 		clientlen = sizeof(clientaddr);
 		connfd = Accept(listenfd, (SA *)&clientaddr, &clientlen);
-		char host[MAXLINE], method[MAXLINE], uri[MAXLINE], version[MAXLINE];
+		char host[MAXLINE+1], method[MAXLINE], uri[MAXLINE], version[MAXLINE];
 		get_header_info(connfd, method, uri, version, host);
         doit(connfd, method, uri, version, host);
 		Close(connfd);
@@ -68,29 +67,22 @@ void get_header_info(int fd, char *method, char *uri, char *version, char *host)
     }
 }
 
-
 /*
  * doit - handle one HTTP request/response transaction
  */
-/* $begin doit */
+
 void doit(int fd, char *method, char *uri, char *version, char *host) 
 {
-    int is_static;
     int port = 0;
-    struct stat sbuf;
-    char filename[MAXLINE], cgiargs[MAXLINE];
+    char filename[MAXLINE];
 
     if (strcasecmp(method, "GET")) {
        clienterror(fd, method, "501", "Not Implemented",
                 "Tiny does not implement this method");
         return;
     }                               
-    //read_requesthdrs(&rio);                              //line:netp:doit:readrequesthdrs
-
-    /* Parse URI from GET request */
-    is_static = parse_uri(uri, filename, cgiargs, &port);       //line:netp:doit:staticcheck
-    printf("%s\n", filename);
-    
+    /* Parse URI, filename from GET request */
+    parse_uri(uri, filename, host, &port);      
 }
 
 /*
@@ -108,59 +100,39 @@ void read_requesthdrs(rio_t *rp)
     }
     return;
 }
-/* $end read_requesthdrs */
 
 /*
  * parse_uri - parse URI into filename and CGI args
  * return 0 if dynamic content, 1 if static
  */
-int parse_uri(char *uri, char *filename, char *cgiargs, int *port) 
+
+void parse_uri(char *uri, char *filename, char *host, int *port) 
 {
     char *ptr;
     int httplength = 7;
+    strcpy(filename, ".");
 
-    if (!strstr(uri, "cgi-bin")) {  /* Static content */ //line:netp:parseuri:isstatic
-    	strcpy(cgiargs, "");  
-    	char hostname[MAXLINE+1];
-        char filename[MAXLINE];
-        strcpy(filename, ".");
-
-        if (uri == strstr(uri, "http://")){
-            //if http is at the start of the uri
-            char *pathStart = index(&uri[httplength], '/');
-            strncpy(filename, pathStart, MAXLINE);
-            strncpy(hostname, &uri[httplength], pathStart-&uri[httplength]);
-            strcat(hostname, ""); //to put null character at end
-        }
-        else {
-            // if no http
-            strncpy(hostname, "", 1);
-            strncpy(filename, uri, MAXLINE);
-        }
-        if ((ptr = index(hostname, ':')) != NULL){
-            //if there is a port specified
-            char portString[100];
-            strncpy(portString, ptr+1, 100);
-            *port = atoi(portString);
-            ptr[0] = '\0';
-        }
-    	 
-        printf("hostname: %s, filename: %s, port: %d\n",hostname, filename, *port);
-    	return 1;
+    if (uri == strstr(uri, "http://")){
+        //if http is at the start of the uri
+        char *pathStart = index(&uri[httplength], '/');
+        strncpy(filename, pathStart, MAXLINE);
+        strncpy(host, &uri[httplength], pathStart-&uri[httplength]);
+        strcat(host, ""); //to put null character at end
     }
-    else {  /* dynamic content */                        //line:netp:parseuri:isdynamic
-    	ptr = index(uri, '?');                           //line:netp:parseuri:beginextract
-    	if (ptr) {
-    	    strcpy(cgiargs, ptr+1);
-    	    *ptr = '\0';
-    	}
-    	else{ 
-    	    strcpy(cgiargs, "");                         //line:netp:parseuri:endextract
-        }
-    	strcpy(filename, ".");                           //line:netp:parseuri:beginconvert2
-    	strcat(filename, uri);                           //line:netp:parseuri:endconvert2
-    	return 0;
+    else {
+        // if no http
+        strncpy(host, "", 1);
+        strncpy(filename, uri, MAXLINE);
     }
+    if ((ptr = index(host, ':')) != NULL){
+        //if there is a port specified
+        char portString[100];
+        strncpy(portString, ptr+1, 100);
+        *port = atoi(portString);
+        ptr[0] = '\0';
+    }
+	 
+    printf("host: %s, filename: %s, port: %d\n",host, filename, *port);
 }
 /* $end parse_uri */
 
@@ -203,31 +175,6 @@ void get_filetype(char *filename, char *filetype)
     else
 	strcpy(filetype, "text/plain");
 }  
-/* $end serve_static */
-
-/*
- * serve_dynamic - run a CGI program on behalf of the client
- */
-/* $begin serve_dynamic */
-void serve_dynamic(int fd, char *filename, char *cgiargs) 
-{
-    char buf[MAXLINE], *emptylist[] = { NULL };
-
-    /* Return first part of HTTP response */
-    sprintf(buf, "HTTP/1.0 200 OK\r\n"); 
-    Rio_writen(fd, buf, strlen(buf));
-    sprintf(buf, "Server: Tiny Web Server\r\n");
-    Rio_writen(fd, buf, strlen(buf));
-  
-    if (Fork() == 0) { /* child */ //line:netp:servedynamic:fork
-	/* Real server would set all CGI vars here */
-	setenv("QUERY_STRING", cgiargs, 1); //line:netp:servedynamic:setenv
-	Dup2(fd, STDOUT_FILENO);         /* Redirect stdout to client */ //line:netp:servedynamic:dup2
-	Execve(filename, emptylist, environ); /* Run CGI program */ //line:netp:servedynamic:execve
-    }
-    Wait(NULL); /* Parent waits for and reaps child */ //line:netp:servedynamic:wait
-}
-/* $end serve_dynamic */
 
 /*
  * clienterror - returns an error message to the client

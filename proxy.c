@@ -9,7 +9,6 @@ static const char *user_agent = "User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:
 static const char *accept_line = "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8\r\n";
 static const char *accept_encoding = "Accept-Encoding: gzip, deflate\r\n";
 
-void doit(int fd, char *method, char *uri, char *version, char *host);
 void read_requesthdrs(rio_t *rp);
 void parse_uri(char *uri, char *filename, char *host, int *port);
 void serve_static(int fd, char *filename, int filesize);
@@ -18,6 +17,7 @@ void clienterror(int fd, char *cause, char *errnum,
 	char *shortmsg, char *longmsg);
 void get_header_info(int fd, char *method, char *uri, 
 	char *version, char *host);
+int is_valid_method(int fd, char *method);
 
 int main(int argc, char **argv){
     printf("%s%s%sport:%s \n", user_agent, accept_line, accept_encoding, argv[1]);
@@ -36,12 +36,27 @@ int main(int argc, char **argv){
     while (1) {
 		clientlen = sizeof(clientaddr);
 		connfd = Accept(listenfd, (SA *)&clientaddr, &clientlen);
-		char host[MAXLINE+1], method[MAXLINE], uri[MAXLINE], version[MAXLINE];
+		char host[MAXLINE+1], method[MAXLINE], uri[MAXLINE], version[MAXLINE], filename[MAXLINE];
+        int port = 0;
 		get_header_info(connfd, method, uri, version, host);
-        doit(connfd, method, uri, version, host);
-		Close(connfd);
+        if (!is_valid_method(connfd, method)){
+            Close(connfd);
+        }
+        else {
+            parse_uri(uri, filename, host, &port);  
+    		Close(connfd);
+        }
     }
     return 0;
+}
+
+int is_valid_method(int fd, char *method){
+    if (strcasecmp(method, "GET")) {
+       clienterror(fd, method, "501", "Not Implemented",
+                "Tiny does not implement this method");
+        return 0;
+    }
+    return 1;
 }
 
 void get_header_info(int fd, char *method, char *uri, char *version, char *host){
@@ -68,40 +83,6 @@ void get_header_info(int fd, char *method, char *uri, char *version, char *host)
 }
 
 /*
- * doit - handle one HTTP request/response transaction
- */
-
-void doit(int fd, char *method, char *uri, char *version, char *host) 
-{
-    int port = 0;
-    char filename[MAXLINE];
-
-    if (strcasecmp(method, "GET")) {
-       clienterror(fd, method, "501", "Not Implemented",
-                "Tiny does not implement this method");
-        return;
-    }                               
-    /* Parse URI, filename from GET request */
-    parse_uri(uri, filename, host, &port);      
-}
-
-/*
- * read_requesthdrs - read and parse HTTP request headers
- */
-
-void read_requesthdrs(rio_t *rp) 
-{
-    char buf[MAXLINE];
-
-    Rio_readlineb(rp, buf, MAXLINE);
-    while(strcmp(buf, "\r\n")) {          //line:netp:readhdrs:checkterm
-	Rio_readlineb(rp, buf, MAXLINE);
-	printf("%s", buf);
-    }
-    return;
-}
-
-/*
  * parse_uri - parse URI into filename and CGI args
  * return 0 if dynamic content, 1 if static
  */
@@ -113,17 +94,19 @@ void parse_uri(char *uri, char *filename, char *host, int *port)
     strcpy(filename, ".");
 
     if (uri == strstr(uri, "http://")){
-        //if http is at the start of the uri
+        //if http (ie. http://google.com:80/index)
         char *pathStart = index(&uri[httplength], '/');
         strncpy(filename, pathStart, MAXLINE);
         strncpy(host, &uri[httplength], pathStart-&uri[httplength]);
         strcat(host, ""); //to put null character at end
     }
     else {
-        // if no http
-        strncpy(host, "", 1);
-        strncpy(filename, uri, MAXLINE);
+        // if no http (ie. google.com:80/index)
+        char *pathStart = index(uri, '/');
+        strncpy(filename, pathStart, MAXLINE);
+        strncpy(host, uri, pathStart-uri);
     }
+
     if ((ptr = index(host, ':')) != NULL){
         //if there is a port specified
         char portString[100];

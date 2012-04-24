@@ -89,30 +89,7 @@ void doit(int fd, char *method, char *uri, char *version, char *host)
     /* Parse URI from GET request */
     is_static = parse_uri(uri, filename, cgiargs, &port);       //line:netp:doit:staticcheck
     printf("%s\n", filename);
-    assert(0);
-    if (stat(filename, &sbuf) < 0) {                     //line:netp:doit:beginnotfound
-    	clienterror(fd, filename, "404", "Not found",
-    		    "Tiny couldn't find this file");
-    	return;
-    }                                                    //line:netp:doit:endnotfound
-
-    if (is_static) { /* Serve static content */          
-    	if (!(S_ISREG(sbuf.st_mode)) || !(S_IRUSR & sbuf.st_mode)) { //line:netp:doit:readable
-    	    clienterror(fd, filename, "403", "Forbidden",
-    			"Tiny couldn't read the file");
-    	    return;
-    	}
-        printf("sldfjsdlkfjdfsl\n");
-    	serve_static(fd, filename, sbuf.st_size);        //line:netp:doit:servestatic
-    }
-    else { /* Serve dynamic content */
-	if (!(S_ISREG(sbuf.st_mode)) || !(S_IXUSR & sbuf.st_mode)) { //line:netp:doit:executable
-	    clienterror(fd, filename, "403", "Forbidden",
-			"Tiny couldn't run the CGI program");
-	    return;
-	}
-	serve_dynamic(fd, filename, cgiargs);            //line:netp:doit:servedynamic
-    }
+    
 }
 
 /*

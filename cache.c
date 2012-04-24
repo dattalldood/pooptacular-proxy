@@ -33,18 +33,21 @@ static void delete (dll *elem) {
     /* elem is NULL; do nothing */
     if (!elem)
         return;
-    /* previous and next element; set pointers accordingly to remove elem from
-     * the list */
+    /* middle element; set pointers accordingly to remove elem from the list */
     else if (elem->next && elem->prev) {
         elem->prev->next = elem->next;
         elem->next->prev = elem->prev;
     }
-    /* elem is the first element; set the next element to be first */
-    else if (elem->next)
+    /* elem is the front element; set the next element to be front */
+    else if (elem->next) {
+        front = elem->next;
         elem->next->prev = NULL;
-    /* elem is the last element; set the previous element to be last */
-    else if (elem->prev)
+    }
+    /* elem is the back element; set the previous element to be back */
+    else if (elem->prev) {
+        back = elem->prev;
         elem->prev->next = NULL;
+    }
     /* if we store data, deleting the element will decrease the cache size */
     if (elem->resp)
         cachesize -= strlen(elem->resp);
@@ -92,15 +95,48 @@ int insert (char *request, char *response) {
 
 /* moves the given element to the front of the list */
 static void update (dll *elem) {
-    //TODO
-    return;
+    /* elem is NULL; do nothing */
+    if (!elem)
+        return;
+    /* elem is already the front element; no action is required */
+    else if (!elem->prev)
+        return;
+    /* elem is the back list element; make the previous element the back */
+    else if (!elem->next) {
+        elem->prev->next = NULL;
+        back = elem->prev;
+    }
+    /* elem is a middle element; remove and set pointers accordingly */
+    else {
+        elem->prev->next = elem->next;
+        elem->next->prev = elem->prev;
+    }
+    /* make elem the front element */
+    elem->prev = NULL;
+    elem->next = front;
+    front->prev = elem;
+    front = elem;
 }
 
 /* looks for the given HTTP request string in the cache. if found, returns the
  * corresponding response and moves the containing list element to the front of
  * the list; otherwise returns NULL */
 char *lookup (char *request) {
-    //TODO
-    update(NULL);
+
+    dll *current = front;
+
+    /* search until we find the key or we reach the end of the list */
+    while (current) {
+        /* success! */
+        if (current->req && !strcmp(request, current->req)) {
+            update(current);
+            return current->resp;
+        }
+        /* these are not the droids we're looking for */
+        else
+            current = current->next;
+    }
+
+    /* search failed; return NULL */
     return NULL;
 }

@@ -47,54 +47,33 @@ int main(int argc, char **argv){
     while (1) {
         int connfd, serverfd;
 		clientlen = sizeof(clientaddr);
-        //printf("not broken 1\n");
 		connfd = Accept(listenfd, (SA *)&clientaddr, &clientlen);
 		char host[MAXLINE+1], method[MAXLINE];
         char version[MAXLINE], filename[MAXLINE];
         int port = 80;
         char request_buffer[MAXLINE*100];
-        //printf("not broken 2\n");
 		get_header_info(connfd, method, version, host, filename, &port, request_buffer);
-        //printf("not broken 3\n");
         int gtg = 1;
         if (gtg && is_valid_method(connfd, method)) {
             printf("connecting to: %s on port %d\n", host, port);
             serverfd = Open_clientfd(host, port);
-
-            //printf("request buffer\n%s\n", request_buffer);
-            //printf("here1\n");
             send_request_to_server(host, port, request_buffer, serverfd);
-            //printf("here2\n");
             char responsebuf[128];
-            //printf("--------------------\n");
             int data;
             sigset_t mask;
             Sigemptyset(&mask);
             Sigaddset(&mask, SIGPIPE);
             Sigprocmask(SIG_BLOCK, &mask, NULL);
-            //printf("here3\n");
             while ((data = rio_readn(serverfd, (int *)responsebuf, 128)) > 0) {
-                //printf("%s\n", responsebuf);
-                //printf("here4\n");
                 if (rio_writen(connfd, (int *)responsebuf, data) < 0) {
-                    //printf("here4.5\n");
                     gtg = 0;
                     break;
                 }
-
-                //printf("here5\n");
             }
-            //printf("here5.5\n");
             Sigprocmask(SIG_UNBLOCK, &mask, NULL);
-            //printf("==========================================================\n");
-            //printf("here6\n");
             Close(serverfd);
-            //printf("here7\n");
         }
-        //printf("here8\n");
-        //if (gtg)
         Close(connfd);
-        //printf("here9\n");
     }
     return 0;
 }
@@ -117,7 +96,6 @@ void get_header_info(int fd, char *method, char *version, char *host, char *file
 	sscanf(buf, "%s %s %s", method, uri, version);
     parse_uri(uri, filename, host, port);
     //add default HTTP request info
-    //strncpy(request_buffer, buf, MAXLINE);
     sprintf(request_buffer, "%s http://%s%s HTTP/1.0\r\n", method, host, filename);
     strcat(request_buffer, "Host: ");
     strcat(request_buffer, host);

@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include "csapp.h"
 #include <assert.h>
+#include <signal.h>
 
 #define MAX_CACHE_SIZE 1049000
 #define MAX_OBJECT_SIZE 102400
@@ -20,7 +21,17 @@ void get_header_info(int fd, char *method, char *version, char *host,
 int is_valid_method(int fd, char *method);
 void send_request_to_server(char *host, int port, char *request_buffer, int serverfd);
 
+/* Handler for SIGPIPE exceptions */
+void pipe_handler(int sig) {
+    return;
+    //printf("SIGPIPE caught\n");
+}
+
 int main(int argc, char **argv){
+
+    if (signal(SIGPIPE, pipe_handler) == SIG_ERR)
+        unix_error("signal handler error\n");
+
     printf("%s%s%sport:%s \n", user_agent, accept_line, accept_encoding, argv[1]);
     int listenfd, port;
     socklen_t clientlen;
@@ -35,32 +46,55 @@ int main(int argc, char **argv){
     listenfd = Open_listenfd(port);
     while (1) {
         int connfd, serverfd;
-
 		clientlen = sizeof(clientaddr);
+        //printf("not broken 1\n");
 		connfd = Accept(listenfd, (SA *)&clientaddr, &clientlen);
 		char host[MAXLINE+1], method[MAXLINE];
         char version[MAXLINE], filename[MAXLINE];
         int port = 80;
         char request_buffer[MAXLINE*100];
+        //printf("not broken 2\n");
 		get_header_info(connfd, method, version, host, filename, &port, request_buffer);
-        if (is_valid_method(connfd, method)){
+        //printf("not broken 3\n");
+        int gtg = 1;
+        if (gtg && is_valid_method(connfd, method)) {
             printf("connecting to: %s on port %d\n", host, port);
             serverfd = Open_clientfd(host, port);
 
-            printf("request buffer\n%s\n", request_buffer);
+            //printf("request buffer\n%s\n", request_buffer);
+            //printf("here1\n");
             send_request_to_server(host, port, request_buffer, serverfd);
-            char responsebuf[MAXLINE];
-            printf("--------------------\n");
+            //printf("here2\n");
+            char responsebuf[128];
+            //printf("--------------------\n");
             int data;
-            while ((data = rio_readn(serverfd, (int *)responsebuf, MAXLINE))) {
-                printf("%s\n", responsebuf);
-                Rio_writen(connfd, (int *)responsebuf, data);
-            }
-            printf("==========================================================\n");
-            Close(serverfd);
-        }
+            sigset_t mask;
+            Sigemptyset(&mask);
+            Sigaddset(&mask, SIGPIPE);
+            Sigprocmask(SIG_BLOCK, &mask, NULL);
+            //printf("here3\n");
+            while ((data = rio_readn(serverfd, (int *)responsebuf, 128)) > 0) {
+                //printf("%s\n", responsebuf);
+                //printf("here4\n");
+                if (rio_writen(connfd, (int *)responsebuf, data) < 0) {
+                    //printf("here4.5\n");
+                    gtg = 0;
+                    break;
+                }
 
+                //printf("here5\n");
+            }
+            //printf("here5.5\n");
+            Sigprocmask(SIG_UNBLOCK, &mask, NULL);
+            //printf("==========================================================\n");
+            //printf("here6\n");
+            Close(serverfd);
+            //printf("here7\n");
+        }
+        //printf("here8\n");
+        //if (gtg)
         Close(connfd);
+        //printf("here9\n");
     }
     return 0;
 }
@@ -106,7 +140,7 @@ void get_header_info(int fd, char *method, char *version, char *host, char *file
     }
 
     strcat(request_buffer, "\r\n");
-    printf("+++++++++%s\n", request_buffer);
+    //printf("+++++++++%s\n", request_buffer);
 }
 
 void send_request_to_server(char *host, int port, char *request_buffer, int serverfd){
@@ -162,31 +196,6 @@ void parse_uri(char *uri, char *filename, char *host, int *port)
     printf("host: %s, filename: %s, port: %d\n",host, filename, *port);
 }
 /* $end parse_uri */
-
-/*
- * serve_static - copy a file back to the client 
- */
-/* $begin serve_static */
-void serve_static(int fd, char *filename, int filesize) 
-{
-    int srcfd;
-    char *srcp, filetype[MAXLINE], buf[MAXBUF];
- 
-    /* Send response headers to client */
-    get_filetype(filename, filetype);       //line:netp:servestatic:getfiletype
-    sprintf(buf, "HTTP/1.0 200 OK\r\n");    //line:netp:servestatic:beginserve
-    sprintf(buf, "%sServer: Tiny Web Server\r\n", buf);
-    sprintf(buf, "%sContent-length: %d\r\n", buf, filesize);
-    sprintf(buf, "%sContent-type: %s\r\n\r\n", buf, filetype);
-    Rio_writen(fd, buf, strlen(buf));       //line:netp:servestatic:endserve
-
-    /* Send response body to client */
-    srcfd = Open(filename, O_RDONLY, 0);    
-    srcp = Mmap(0, filesize, PROT_READ, MAP_PRIVATE, srcfd, 0);
-    Close(srcfd);       
-    Rio_writen(fd, srcp, filesize);  
-    Munmap(srcp, filesize);          
-}
 
 /*
  * get_filetype - derive file type from file name

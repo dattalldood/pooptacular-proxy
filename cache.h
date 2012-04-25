@@ -16,3 +16,5 @@ typedef struct dll {
 void copybytes(char *dest, char *src, int datasize);
 dll *lookup (char *request);
 int insert (char *request, char *response, int datasize);
+
+sem_t mutex, w;

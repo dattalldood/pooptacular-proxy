@@ -4,9 +4,7 @@ static dll *back = NULL;
 
 /* Concurrency setup */
 volatile int readcnt = 0;
-sem_t mutex, w;
-//Sem_init(&mutex, 0, 1); //mutex = 1
-//Sem_init(&w, 0, 1); //mutex = 1
+
 
 static int cachesize = 0;
 
@@ -43,27 +41,23 @@ static void delete (dll *elem) {
     }
     /* if we store data, deleting the element will decrease the cache size */
     if (elem->resp)
-        cachesize -= strlen(elem->resp);
+        cachesize -= elem->datasize;
     /* free elem */
     elem_free(elem);
 }
 
-void copybytes(char *dest, char *src, int datasize){
-    int i;
-    for (i=0; i<datasize; i++){
-        dest[i] = src[i];
-    }
-}
 
 /* insert a response into the cache. Returns 0 on success or -1 on failure */
 int insert (char *request, char *response, int datasize) {
     //Concurrency: insert is a writer
-    int size = strlen(response);
-
+    printf("poop i cant write\n");
+    P(&w);
+    printf("yes i can.,\n");
     /* if there is not enough room in the cache, delete the least recently used
      * list elements until space is avalable */
-    while (cachesize + size > MAX_CACHE_SIZE)
+    while (cachesize + datasize > MAX_CACHE_SIZE){
         delete(back);
+    }
 
     /* we have room in the cache for the object */
     char *creq = malloc(sizeof(char) * (strlen(request) + 1));
@@ -73,7 +67,7 @@ int insert (char *request, char *response, int datasize) {
     if (!new || !creq || !cresp)
         return -1;
     strcpy(creq, request);
-    copybytes(cresp, response, datasize);
+    memcpy(cresp, response, datasize);
     new->req = creq;
     new->resp = cresp;
     new->prev = NULL;
@@ -88,8 +82,9 @@ int insert (char *request, char *response, int datasize) {
         front->prev = new;
         front = new;
     }
-    cachesize += size;
+    cachesize += datasize;
 
+    V(&w);
     /* success */
     return 0;
 }
@@ -124,8 +119,11 @@ static void update (dll *elem) {
  * the list; otherwise returns NULL */
 dll *lookup (char *request) {
     // Concurrency: lookup is a reader
-    /*P(&mutex);
-    readcnt++;*/
+    P(&mutex);
+    readcnt++;
+    if (readcnt == 1)
+        P(&w);
+    V(&mutex);
     dll *current = front;
 
     /* search until we find the key or we reach the end of the list */
@@ -133,12 +131,24 @@ dll *lookup (char *request) {
         /* success! */
         if (current->req && !strcmp(request, current->req)) {
             update(current);
+
+            P(&mutex);
+            readcnt--;
+            if (readcnt == 0)
+                V(&w);
+            V(&mutex);
             return current;
         }
         /* these are not the droids we're looking for */
         else
             current = current->next;
     }
+
+    P(&mutex);
+    readcnt--;
+    if (readcnt == 0)
+        V(&w);
+    V(&mutex);
 
     /* search failed; return NULL */
     return NULL;

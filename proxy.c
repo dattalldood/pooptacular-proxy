@@ -21,6 +21,8 @@ void get_header_info(int fd, char *method, char *version, char *host,
     char *filename, int *port, char *request_buffer);
 int is_valid_method(int fd, char *method);
 void send_request_to_server(char *host, int port, char *request_buffer, int serverfd);
+void client_thread(int connfd);
+void thread_safe_init();
 
 /* Handler for SIGPIPE exceptions */
 void pipe_handler(int sig) {
@@ -28,11 +30,11 @@ void pipe_handler(int sig) {
 }
 
 int main(int argc, char **argv){
-
+    thread_safe_init();
     if (signal(SIGPIPE, pipe_handler) == SIG_ERR)
         unix_error("signal handler error\n");
 
-    printf("%s%s%sport:%s \n", user_agent, accept_line, accept_encoding, argv[1]);
+    //printf("%s%s%sport:%s \n", user_agent, accept_line, accept_encoding, argv[1]);
     int listenfd, port;
     socklen_t clientlen;
     struct sockaddr_in clientaddr;
@@ -45,54 +47,11 @@ int main(int argc, char **argv){
     
     listenfd = Open_listenfd(port);
     while (1) {
-        int connfd, serverfd;
+        int connfd;
 
 		clientlen = sizeof(clientaddr);
 		connfd = Accept(listenfd, (SA *)&clientaddr, &clientlen);
-		char host[MAXLINE+1], method[MAXLINE];
-        char version[MAXLINE], filename[MAXLINE];
-        int port = 80;
-        char request_buffer[MAXLINE*100];
-        get_header_info(connfd, method, version, host, filename, &port, request_buffer);
-        int gtg = 1;
-        if (gtg && is_valid_method(connfd, method)){
-            sigset_t mask;
-            serverfd = Open_clientfd(host, port);
-            dll *cacheBlock;
-            if ((cacheBlock = lookup(request_buffer)) != NULL){
-                // if its in the cache
-                Rio_writen(connfd, cacheBlock->resp, cacheBlock->datasize);
-            }
-            else {
-                // if its not in the cache
-                char cachebuf[MAX_OBJECT_SIZE];
-                int datasize = 0;
-                int responsebuf[64];
-                int chunksize;
-                send_request_to_server(host, port, request_buffer, serverfd);
-                
-                Sigemptyset(&mask);
-                Sigaddset(&mask, SIGPIPE);
-                Sigprocmask(SIG_BLOCK, &mask, NULL);
-                while ((chunksize = rio_readn(serverfd, responsebuf, 64)) > 0) {
-                    memcpy(cachebuf+datasize, responsebuf, chunksize);
-                    datasize += chunksize;
-                    if (rio_writen(connfd, responsebuf, chunksize) < 0) {
-                        gtg = 0;
-                        break;
-                    }
-                }
-                //add the data to the cache, only if it fits
-                if (gtg && (datasize <= MAX_OBJECT_SIZE)){
-                    if (insert(request_buffer, cachebuf, datasize) < 0){
-                        printf("cache insertion error\n");
-                    }   
-                }
-            }
-            Sigprocmask(SIG_UNBLOCK, &mask, NULL);
-            Close(serverfd);
-        }
-        Close(connfd);
+        client_thread(connfd);
     }
     return 0;
 }
@@ -104,6 +63,64 @@ int is_valid_method(int fd, char *method){
         return 0;
     }
     return 1;
+}
+
+void thread_safe_init(){
+    Sem_init(&mutex, 0, 1); //mutex = 1
+    Sem_init(&w, 0, 1); //mutex = 1
+}
+
+void client_thread(int connfd){
+    int serverfd;
+    char host[MAXLINE+1], method[MAXLINE];
+    char version[MAXLINE], filename[MAXLINE];
+    int port = 80;
+    char request_buffer[MAXLINE*100];
+    get_header_info(connfd, method, version, host, filename, &port, request_buffer);
+    int gtg = 1;
+    if (gtg && is_valid_method(connfd, method)){
+        sigset_t mask;
+        serverfd = Open_clientfd(host, port);
+        dll *cacheBlock;
+        if ((cacheBlock = lookup(request_buffer)) != NULL){
+            // if its in the cache
+            Rio_writen(connfd, cacheBlock->resp, cacheBlock->datasize);
+        }
+        else {
+            // if its not in the cache
+            printf("      not in cache\n");
+            char cachebuf[MAX_OBJECT_SIZE];
+            int datasize = 0;
+            int responsebuf[64];
+            int chunksize;
+            send_request_to_server(host, port, request_buffer, serverfd);
+            
+
+            Sigemptyset(&mask);
+            Sigaddset(&mask, SIGPIPE);
+            Sigprocmask(SIG_BLOCK, &mask, NULL);
+            while ((chunksize = rio_readn(serverfd, responsebuf, 64)) > 0) {
+                if (datasize+chunksize <= MAX_OBJECT_SIZE){
+                    memcpy(cachebuf+datasize, responsebuf, chunksize);    
+                }
+                datasize += chunksize;
+                if (rio_writen(connfd, responsebuf, chunksize) < 0) {
+                    gtg = 0;
+                    break;
+                }
+            }
+            //add the data to the cache, only if it fits
+            if (gtg && (datasize <= MAX_OBJECT_SIZE)){
+                if (insert(request_buffer, cachebuf, datasize) < 0){
+                    printf("cache insertion error\n");
+                }   
+            }
+        }
+        Sigprocmask(SIG_UNBLOCK, &mask, NULL);
+        Close(serverfd);
+    }
+    Close(connfd);
+    printf("Connection Closed\n");
 }
 
 void get_header_info(int fd, char *method, char *version, char *host, char *filename, int *port, char *request_buffer){

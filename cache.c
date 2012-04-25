@@ -5,8 +5,8 @@ static dll *back = NULL;
 /* Concurrency setup */
 volatile int readcnt = 0;
 sem_t mutex, w;
-Sem_init(&mutex, 0, 1); //mutex = 1
-Sem_init(&w, 0, 1); //mutex = 1
+//Sem_init(&mutex, 0, 1); //mutex = 1
+//Sem_init(&w, 0, 1); //mutex = 1
 
 static int cachesize = 0;
 
@@ -124,8 +124,8 @@ static void update (dll *elem) {
  * the list; otherwise returns NULL */
 dll *lookup (char *request) {
     // Concurrency: lookup is a reader
-    P(&mutex);
-    readcnt++;
+    /*P(&mutex);
+    readcnt++;*/
     dll *current = front;
 
     /* search until we find the key or we reach the end of the list */

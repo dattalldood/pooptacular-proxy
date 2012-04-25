@@ -40,6 +40,7 @@ int main(int argc, char **argv){
 		connfd = Accept(listenfd, (SA *)&clientaddr, &clientlen);
 		char host[MAXLINE+1], method[MAXLINE];
         char version[MAXLINE], filename[MAXLINE];
+        
         int port = 80;
         char request_buffer[MAXLINE*100];
 		get_header_info(connfd, method, version, host, filename, &port, request_buffer);
@@ -82,8 +83,8 @@ void get_header_info(int fd, char *method, char *version, char *host, char *file
 	sscanf(buf, "%s %s %s", method, uri, version);
     parse_uri(uri, filename, host, port);
     //add default HTTP request info
-    strncpy(request_buffer, buf, MAXLINE);
-    //sprintf(request_buffer, "%s %s HTTP/1.0\r\n", method, filename);
+    //strncpy(request_buffer, buf, MAXLINE);
+    sprintf(request_buffer, "%s http://%s%s HTTP/1.0\r\n", method, host, filename);
     strcat(request_buffer, "Host: ");
     strcat(request_buffer, host);
     strcat(request_buffer, "\r\n");
@@ -94,20 +95,18 @@ void get_header_info(int fd, char *method, char *version, char *host, char *file
     while (1){
 	    Rio_readlineb(&rio, buf, MAXLINE);
 	    if (!strcmp(buf,"\r\n")) break;
-    	char key[MAXLINE], value[MAXLINE];
-    	sscanf(buf, "%s %s", key, value);
     	// extract the host 
-    	if (!strcmp(key, "Host:")){
-    		strncpy(host, value, MAXLINE);
-    		printf("  host: %s\n\n", host);
-            strcat(request_buffer, buf);
+    	if (strstr(buf, "Host:") != NULL){
+    		//ignore
     	}
-        else if (strcmp(key, "User-Agent:") && strcmp(key, "Accept:") && strcmp(key, "Accept-Encoding:")){
+        else if (strstr(buf, "User-Agent:")==NULL && strstr(buf, "Accept:")==NULL && strstr(buf, "Accept-Encoding:")==NULL){
             //if key isnt user-agent, accept, or accept-encoding
             strcat(request_buffer, buf);
         }
     }
+
     strcat(request_buffer, "\r\n");
+    printf("+++++++++%s\n", request_buffer);
 }
 
 void send_request_to_server(char *host, int port, char *request_buffer, int serverfd){

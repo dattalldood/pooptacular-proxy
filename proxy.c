@@ -49,11 +49,12 @@ int main(int argc, char **argv){
 
             printf("request buffer\n%s\n", request_buffer);
             send_request_to_server(host, port, request_buffer, serverfd);
-            char responsebuf[MAXLINE*100];
+            char responsebuf[MAXLINE];
             printf("--------------------\n");
-            rio_readn(serverfd, responsebuf, MAXLINE*100);
-            printf("%s\n", responsebuf);
-            Rio_writen(connfd, responsebuf, strlen(responsebuf));
+            while (rio_readn(serverfd, responsebuf, MAXLINE)) {
+                printf("%s\n", responsebuf);
+                Rio_writen(connfd, responsebuf, strlen(responsebuf));
+            }
             printf("==========================================================\n");
             Close(serverfd);
         }
@@ -81,7 +82,8 @@ void get_header_info(int fd, char *method, char *version, char *host, char *file
 	sscanf(buf, "%s %s %s", method, uri, version);
     parse_uri(uri, filename, host, port);
     //add default HTTP request info
-    sprintf(request_buffer, "%s %s HTTP/1.0\r\n", method, filename);
+    strncpy(request_buffer, buf, MAXLINE);
+    //sprintf(request_buffer, "%s %s HTTP/1.0\r\n", method, filename);
     strcat(request_buffer, "Host: ");
     strcat(request_buffer, host);
     strcat(request_buffer, "\r\n");

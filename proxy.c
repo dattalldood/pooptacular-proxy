@@ -52,10 +52,7 @@ int main(int argc, char **argv){
             dll *cacheBlock;
             if ((cacheBlock = lookup(request_buffer)) != NULL){
                 // if its in the cache
-                printf("  it was in the cache!!!\n  sending data size:%d\n",cacheBlock->datasize);
                 Rio_writen(connfd, cacheBlock->resp, cacheBlock->datasize);
-                printf("done sending data\n");
-                //printf("%s\n", cacheBlock->resp);
             }
             else {
                 // if its not in the cache
@@ -76,11 +73,8 @@ int main(int argc, char **argv){
                     if (insert(request_buffer, cachebuf, datasize) < 0){
                         printf("cache insertion error\n");
                     }   
-                    printf("data size inserting into cache%d \n", datasize);
-
                 }
             }
-            printf("closing serverfd\n");
             Close(serverfd);
         }
         printf("done with connection\n");

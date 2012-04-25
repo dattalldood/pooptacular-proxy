@@ -2,6 +2,12 @@
 static dll *front = NULL;
 static dll *back = NULL;
 
+/* Concurrency setup */
+volatile int readcnt = 0;
+sem_t mutex, w;
+Sem_init(&mutex, 0, 1); //mutex = 1
+Sem_init(&w, 0, 1); //mutex = 1
+
 static int cachesize = 0;
 
 /* frees the given list element */
@@ -51,7 +57,7 @@ void copybytes(char *dest, char *src, int datasize){
 
 /* insert a response into the cache. Returns 0 on success or -1 on failure */
 int insert (char *request, char *response, int datasize) {
-
+    //Concurrency: insert is a writer
     int size = strlen(response);
 
     /* if there is not enough room in the cache, delete the least recently used
@@ -117,7 +123,9 @@ static void update (dll *elem) {
  * corresponding response and moves the containing list element to the front of
  * the list; otherwise returns NULL */
 dll *lookup (char *request) {
-
+    // Concurrency: lookup is a reader
+    P(&mutex);
+    readcnt++;
     dll *current = front;
 
     /* search until we find the key or we reach the end of the list */

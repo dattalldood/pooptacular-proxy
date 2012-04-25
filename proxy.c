@@ -40,7 +40,6 @@ int main(int argc, char **argv){
 		connfd = Accept(listenfd, (SA *)&clientaddr, &clientlen);
 		char host[MAXLINE+1], method[MAXLINE];
         char version[MAXLINE], filename[MAXLINE];
-        
         int port = 80;
         char request_buffer[MAXLINE*100];
 		get_header_info(connfd, method, version, host, filename, &port, request_buffer);
@@ -52,9 +51,10 @@ int main(int argc, char **argv){
             send_request_to_server(host, port, request_buffer, serverfd);
             char responsebuf[MAXLINE];
             printf("--------------------\n");
-            while (rio_readn(serverfd, responsebuf, MAXLINE)) {
+            int data;
+            while ((data = rio_readn(serverfd, (int *)responsebuf, MAXLINE))) {
                 printf("%s\n", responsebuf);
-                Rio_writen(connfd, responsebuf, strlen(responsebuf));
+                Rio_writen(connfd, (int *)responsebuf, data);
             }
             printf("==========================================================\n");
             Close(serverfd);
@@ -133,6 +133,7 @@ void parse_uri(char *uri, char *filename, char *host, int *port)
         else {
             strncpy(filename, pathStart, MAXLINE);    
             strncpy(host, &uri[httplength], pathStart-&uri[httplength]);
+            host[(pathStart-&uri[httplength])] = '\0';
         }
         
         strcat(host, ""); //to put null character at end

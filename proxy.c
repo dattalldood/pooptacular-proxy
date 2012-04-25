@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include "csapp.h"
 #include <assert.h>
+#include "cache.h"
 
 #define MAX_CACHE_SIZE 1049000
 #define MAX_OBJECT_SIZE 102400
@@ -44,22 +45,47 @@ int main(int argc, char **argv){
         char request_buffer[MAXLINE*100];
 		get_header_info(connfd, method, version, host, filename, &port, request_buffer);
         if (is_valid_method(connfd, method)){
-            printf("connecting to: %s on port %d\n", host, port);
+            //printf("connecting to: %s on port %d\n", host, port);
             serverfd = Open_clientfd(host, port);
 
-            printf("request buffer\n%s\n", request_buffer);
-            send_request_to_server(host, port, request_buffer, serverfd);
-            char responsebuf[MAXLINE];
-            printf("--------------------\n");
-            int data;
-            while ((data = rio_readn(serverfd, (int *)responsebuf, MAXLINE))) {
-                printf("%s\n", responsebuf);
-                Rio_writen(connfd, (int *)responsebuf, data);
+            //printf("request buffer\n%s\n", request_buffer);
+            dll *cacheBlock;
+            if ((cacheBlock = lookup(request_buffer)) != NULL){
+                // if its in the cache
+                printf("it was in the cache!!!\n");
+                Rio_writen(connfd, cacheBlock->resp, cacheBlock->datasize);
+                printf("%s\n", cacheBlock->resp);
             }
-            printf("==========================================================\n");
+            else {
+                // if its not in the cache
+                char cachebuf[MAX_OBJECT_SIZE];
+                int datasize = 0;
+                int responsebuf[64];
+                int chunksize;
+
+                send_request_to_server(host, port, request_buffer, serverfd);
+                while ((chunksize = Rio_readn(serverfd, responsebuf, 64))) {
+                    int i;
+                    for (i=0; i<chunksize; i++){
+                        printf("%s - %d\n", cachebuf, datasize);
+                        cachebuf[datasize+i] = responsebuf[i];
+                        printf("%s - %d\n", cachebuf, datasize);
+                        printf("what was just inserted into cache%s\n", cachebuf+i);
+                    }
+
+                    datasize += chunksize;
+                    Rio_writen(connfd, responsebuf, chunksize);
+                }
+                //add the data to the cache, only if it fits
+                if (datasize <= MAX_OBJECT_SIZE){
+                    printf("%d\n", datasize);    
+                    insert(request_buffer, cachebuf, datasize);    
+                }
+            }
+            printf("closing serverfd\n");
             Close(serverfd);
         }
-
+        printf("done with connection\n");
         Close(connfd);
     }
     return 0;
@@ -106,7 +132,6 @@ void get_header_info(int fd, char *method, char *version, char *host, char *file
     }
 
     strcat(request_buffer, "\r\n");
-    printf("+++++++++%s\n", request_buffer);
 }
 
 void send_request_to_server(char *host, int port, char *request_buffer, int serverfd){

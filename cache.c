@@ -1,4 +1,18 @@
-#include "cache.h"
+#include <stdio.h>
+#include "csapp.h"
+#include <assert.h>
+
+#define MAX_CACHE_SIZE 1049000
+#define MAX_OBJECT_SIZE 102400
+
+typedef struct dll {
+    struct dll *next;
+    struct dll *prev;
+    char *req;
+    char *resp;
+    size_t size;
+} dll;
+
 static dll *front = NULL;
 static dll *back = NULL;
 
@@ -42,15 +56,8 @@ static void delete (dll *elem) {
     elem_free(elem);
 }
 
-void copybytes(char *dest, char *src, int datasize){
-    int i;
-    for (i=0; i<datasize; i++){
-        dest[i] = src[i];
-    }
-}
-
 /* insert a response into the cache. Returns 0 on success or -1 on failure */
-int insert (char *request, char *response, int datasize) {
+int insert (char *request, char *response) {
 
     int size = strlen(response);
 
@@ -61,13 +68,13 @@ int insert (char *request, char *response, int datasize) {
 
     /* we have room in the cache for the object */
     char *creq = malloc(sizeof(char) * (strlen(request) + 1));
-    char *cresp = malloc(datasize);
+    char *cresp = malloc(sizeof(char) * (strlen(response) + 1));
     dll *new = malloc(sizeof(dll));
     /* mallloc failure */
     if (!new || !creq || !cresp)
         return -1;
     strcpy(creq, request);
-    copybytes(cresp, response, datasize);
+    strcpy(cresp, response);
     new->req = creq;
     new->resp = cresp;
     new->prev = NULL;
@@ -115,7 +122,7 @@ static void update (dll *elem) {
 /* looks for the given HTTP request string in the cache. if found, returns the
  * corresponding response and moves the containing list element to the front of
  * the list; otherwise returns NULL */
-dll *lookup (char *request) {
+char *lookup (char *request) {
 
     dll *current = front;
 
@@ -124,7 +131,7 @@ dll *lookup (char *request) {
         /* success! */
         if (current->req && !strcmp(request, current->req)) {
             update(current);
-            return current;
+            return current->resp;
         }
         /* these are not the droids we're looking for */
         else

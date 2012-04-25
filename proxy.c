@@ -21,7 +21,7 @@ void get_header_info(int fd, char *method, char *version, char *host,
     char *filename, int *port, char *request_buffer);
 int is_valid_method(int fd, char *method);
 void send_request_to_server(char *host, int port, char *request_buffer, int serverfd);
-void client_thread(int connfd);
+void *client_thread(void *arg);
 void thread_safe_init();
 
 /* Handler for SIGPIPE exceptions */
@@ -35,9 +35,10 @@ int main(int argc, char **argv){
         unix_error("signal handler error\n");
 
     //printf("%s%s%sport:%s \n", user_agent, accept_line, accept_encoding, argv[1]);
-    int listenfd, port;
-    socklen_t clientlen;
+    int listenfd, *connfd, port;
+    pthread_t tid;
     struct sockaddr_in clientaddr;
+	socklen_t clientlen = sizeof(clientaddr);
 
     if (argc != 2) {
 	fprintf(stderr, "usage: %s <port>\n", argv[0]);
@@ -47,11 +48,9 @@ int main(int argc, char **argv){
     
     listenfd = Open_listenfd(port);
     while (1) {
-        int connfd;
-
-		clientlen = sizeof(clientaddr);
-		connfd = Accept(listenfd, (SA *)&clientaddr, &clientlen);
-        client_thread(connfd);
+        connfd = Malloc(sizeof(int));
+		*connfd = Accept(listenfd, (SA *)&clientaddr, &clientlen);
+        Pthread_create(&tid, NULL, client_thread, connfd);
     }
     return 0;
 }
@@ -70,14 +69,22 @@ void thread_safe_init(){
     Sem_init(&w, 0, 1); //mutex = 1
 }
 
-void client_thread(int connfd){
+void *client_thread(void *arg){
+
+    /* detach thread so we no longer need to manage it */
+    if (pthread_detach(pthread_self()))
+        unix_error("pthread detach error\n");
+
+    int connfd = *((int *)arg);
     int serverfd;
     char host[MAXLINE+1], method[MAXLINE];
     char version[MAXLINE], filename[MAXLINE];
     int port = 80;
     char request_buffer[MAXLINE*100];
-    get_header_info(connfd, method, version, host, filename, &port, request_buffer);
     int gtg = 1;
+
+    Free(arg);
+    get_header_info(connfd, method, version, host, filename, &port, request_buffer);
     if (gtg && is_valid_method(connfd, method)){
         sigset_t mask;
         serverfd = Open_clientfd(host, port);
@@ -121,6 +128,7 @@ void client_thread(int connfd){
     }
     Close(connfd);
     printf("Connection Closed\n");
+    return NULL;
 }
 
 void get_header_info(int fd, char *method, char *version, char *host, char *filename, int *port, char *request_buffer){

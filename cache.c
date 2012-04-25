@@ -71,6 +71,7 @@ int insert (char *request, char *response, int datasize) {
     new->req = creq;
     new->resp = cresp;
     new->prev = NULL;
+    new->datasize = datasize;
     /* empty cache. start from scratch */
     if (!front) {
         new->next = NULL;

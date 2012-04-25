@@ -1,11 +1,7 @@
 #include <stdio.h>
 #include "csapp.h"
 #include <assert.h>
-<<<<<<< HEAD
 #include "cache.h"
-=======
-#include <signal.h>
->>>>>>> f540bcbd5916ff014de86e350b885aced8e7278c
 
 #define MAX_CACHE_SIZE 1049000
 #define MAX_OBJECT_SIZE 102400
@@ -25,17 +21,7 @@ void get_header_info(int fd, char *method, char *version, char *host,
 int is_valid_method(int fd, char *method);
 void send_request_to_server(char *host, int port, char *request_buffer, int serverfd);
 
-/* Handler for SIGPIPE exceptions */
-void pipe_handler(int sig) {
-    return;
-    //printf("SIGPIPE caught\n");
-}
-
 int main(int argc, char **argv){
-
-    if (signal(SIGPIPE, pipe_handler) == SIG_ERR)
-        unix_error("signal handler error\n");
-
     printf("%s%s%sport:%s \n", user_agent, accept_line, accept_encoding, argv[1]);
     int listenfd, port;
     socklen_t clientlen;
@@ -50,6 +36,7 @@ int main(int argc, char **argv){
     listenfd = Open_listenfd(port);
     while (1) {
         int connfd, serverfd;
+
 		clientlen = sizeof(clientaddr);
 		connfd = Accept(listenfd, (SA *)&clientaddr, &clientlen);
 		char host[MAXLINE+1], method[MAXLINE];
@@ -57,7 +44,6 @@ int main(int argc, char **argv){
         int port = 80;
         char request_buffer[MAXLINE*100];
 		get_header_info(connfd, method, version, host, filename, &port, request_buffer);
-<<<<<<< HEAD
         if (is_valid_method(connfd, method)){
             //printf("connecting to: %s on port %d\n", host, port);
             serverfd = Open_clientfd(host, port);
@@ -66,9 +52,10 @@ int main(int argc, char **argv){
             dll *cacheBlock;
             if ((cacheBlock = lookup(request_buffer)) != NULL){
                 // if its in the cache
-                printf("it was in the cache!!!\n");
+                printf("  it was in the cache!!!\n  sending data size:%d\n",cacheBlock->datasize);
                 Rio_writen(connfd, cacheBlock->resp, cacheBlock->datasize);
-                printf("%s\n", cacheBlock->resp);
+                printf("done sending data\n");
+                //printf("%s\n", cacheBlock->resp);
             }
             else {
                 // if its not in the cache
@@ -79,49 +66,24 @@ int main(int argc, char **argv){
 
                 send_request_to_server(host, port, request_buffer, serverfd);
                 while ((chunksize = Rio_readn(serverfd, responsebuf, 64))) {
-                    int i;
-                    for (i=0; i<chunksize; i++){
-                        printf("%s - %d\n", cachebuf, datasize);
-                        cachebuf[datasize+i] = responsebuf[i];
-                        printf("%s - %d\n", cachebuf, datasize);
-                        printf("what was just inserted into cache%s\n", cachebuf+i);
-                    }
-
+                    memcpy(cachebuf+datasize, responsebuf, chunksize);
                     datasize += chunksize;
                     Rio_writen(connfd, responsebuf, chunksize);
                 }
                 //add the data to the cache, only if it fits
                 if (datasize <= MAX_OBJECT_SIZE){
                     printf("%d\n", datasize);    
-                    insert(request_buffer, cachebuf, datasize);    
+                    if (insert(request_buffer, cachebuf, datasize) < 0){
+                        printf("cache insertion error\n");
+                    }   
+                    printf("data size inserting into cache%d \n", datasize);
+
                 }
             }
             printf("closing serverfd\n");
             Close(serverfd);
         }
         printf("done with connection\n");
-=======
-        int gtg = 1;
-        if (gtg && is_valid_method(connfd, method)) {
-            printf("connecting to: %s on port %d\n", host, port);
-            serverfd = Open_clientfd(host, port);
-            send_request_to_server(host, port, request_buffer, serverfd);
-            char responsebuf[128];
-            int data;
-            sigset_t mask;
-            Sigemptyset(&mask);
-            Sigaddset(&mask, SIGPIPE);
-            Sigprocmask(SIG_BLOCK, &mask, NULL);
-            while ((data = rio_readn(serverfd, (int *)responsebuf, 128)) > 0) {
-                if (rio_writen(connfd, (int *)responsebuf, data) < 0) {
-                    gtg = 0;
-                    break;
-                }
-            }
-            Sigprocmask(SIG_UNBLOCK, &mask, NULL);
-            Close(serverfd);
-        }
->>>>>>> f540bcbd5916ff014de86e350b885aced8e7278c
         Close(connfd);
     }
     return 0;
@@ -145,6 +107,7 @@ void get_header_info(int fd, char *method, char *version, char *host, char *file
 	sscanf(buf, "%s %s %s", method, uri, version);
     parse_uri(uri, filename, host, port);
     //add default HTTP request info
+    //strncpy(request_buffer, buf, MAXLINE);
     sprintf(request_buffer, "%s http://%s%s HTTP/1.0\r\n", method, host, filename);
     strcat(request_buffer, "Host: ");
     strcat(request_buffer, host);
@@ -167,10 +130,6 @@ void get_header_info(int fd, char *method, char *version, char *host, char *file
     }
 
     strcat(request_buffer, "\r\n");
-<<<<<<< HEAD
-=======
-    //printf("+++++++++%s\n", request_buffer);
->>>>>>> f540bcbd5916ff014de86e350b885aced8e7278c
 }
 
 void send_request_to_server(char *host, int port, char *request_buffer, int serverfd){
@@ -226,6 +185,31 @@ void parse_uri(char *uri, char *filename, char *host, int *port)
     printf("host: %s, filename: %s, port: %d\n",host, filename, *port);
 }
 /* $end parse_uri */
+
+/*
+ * serve_static - copy a file back to the client 
+ */
+/* $begin serve_static */
+void serve_static(int fd, char *filename, int filesize) 
+{
+    int srcfd;
+    char *srcp, filetype[MAXLINE], buf[MAXBUF];
+ 
+    /* Send response headers to client */
+    get_filetype(filename, filetype);       //line:netp:servestatic:getfiletype
+    sprintf(buf, "HTTP/1.0 200 OK\r\n");    //line:netp:servestatic:beginserve
+    sprintf(buf, "%sServer: Tiny Web Server\r\n", buf);
+    sprintf(buf, "%sContent-length: %d\r\n", buf, filesize);
+    sprintf(buf, "%sContent-type: %s\r\n\r\n", buf, filetype);
+    Rio_writen(fd, buf, strlen(buf));       //line:netp:servestatic:endserve
+
+    /* Send response body to client */
+    srcfd = Open(filename, O_RDONLY, 0);    
+    srcp = Mmap(0, filesize, PROT_READ, MAP_PRIVATE, srcfd, 0);
+    Close(srcfd);       
+    Rio_writen(fd, srcp, filesize);  
+    Munmap(srcp, filesize);          
+}
 
 /*
  * get_filetype - derive file type from file name

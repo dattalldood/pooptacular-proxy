@@ -87,7 +87,11 @@ void *client_thread(void *arg){
     get_header_info(connfd, method, version, host, filename, &port, request_buffer);
     if (gtg && is_valid_method(connfd, method)){
         sigset_t mask;
-        serverfd = Open_clientfd(host, port);
+        /* if we get an error opening the connection, do nothing */
+        if ((serverfd = open_clientfd(host, port)) < 0) {
+            Close(serverfd);
+            return NULL;
+        }
         dll *cacheBlock;
         if ((cacheBlock = lookup(request_buffer)) != NULL){
             // if its in the cache
@@ -127,7 +131,6 @@ void *client_thread(void *arg){
         Close(serverfd);
     }
     Close(connfd);
-    printf("Connection Closed\n");
     return NULL;
 }
 

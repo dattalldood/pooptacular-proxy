@@ -92,10 +92,10 @@ void *client_thread(void *arg){
         if ((cacheBlock = lookup(request_buffer)) != NULL){
             // if its in the cache
             Rio_writen(connfd, cacheBlock->resp, cacheBlock->datasize);
+            Free(cacheBlock);
         }
         else {
             // if its not in the cache
-            printf("      not in cache\n");
             char cachebuf[MAX_OBJECT_SIZE];
             int datasize = 0;
             int responsebuf[64];

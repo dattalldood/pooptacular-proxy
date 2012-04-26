@@ -20,9 +20,9 @@ static void elem_free (dll *elem) {
     if (!elem)
         return;
     /* free all allocated memory */
-    free(elem->req);
-    free(elem->resp);
-    free(elem);
+    Free(elem->req);
+    Free(elem->resp);
+    Free(elem);
 }
 
 /* removes the given element from the list */
@@ -182,6 +182,8 @@ dll *lookup (char *request) {
     while (current) {
         /* success! */
         if (current->req && !strcmp(request, current->req)) {
+            dll *result = Malloc(sizeof(dll));
+            memcpy(result, current, sizeof(dll));
             update(current);
 
             P(&mutex);
@@ -189,7 +191,7 @@ dll *lookup (char *request) {
             if (readcnt == 0)
                 V(&w);
             V(&mutex);
-            return current;
+            return result;
         }
         /* these are not the droids we're looking for */
         else

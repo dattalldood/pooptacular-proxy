@@ -11,30 +11,20 @@ static const char *user_agent = "User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:
 static const char *accept_line = "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8\r\n";
 static const char *accept_encoding = "Accept-Encoding: gzip, deflate\r\n";
 
-void read_requesthdrs(rio_t *rp);
 void parse_uri(char *uri, char *filename, char *host, int *port);
-void serve_static(int fd, char *filename, int filesize);
-void get_filetype(char *filename, char *filetype);
-void clienterror(int fd, char *cause, char *errnum, 
-	char *shortmsg, char *longmsg);
 void get_header_info(int fd, char *method, char *version, char *host, 
     char *filename, int *port, char *request_buffer);
 int is_valid_method(int fd, char *method);
 void send_request_to_server(char *host, int port, char *request_buffer, int serverfd);
 void *client_thread(void *arg);
 void thread_safe_init();
-
-/* Handler for SIGPIPE exceptions */
-void pipe_handler(int sig) {
-    return;
-}
+void pipe_handler(int sig);
 
 int main(int argc, char **argv){
     thread_safe_init();
     if (signal(SIGPIPE, pipe_handler) == SIG_ERR)
         unix_error("signal handler error\n");
 
-    //printf("%s%s%sport:%s \n", user_agent, accept_line, accept_encoding, argv[1]);
     int listenfd, *connfd, port;
     pthread_t tid;
     struct sockaddr_in clientaddr;
@@ -46,6 +36,8 @@ int main(int argc, char **argv){
     }
     port = atoi(argv[1]);
     
+    /* Accepts new connections and spawns new threads to deal with
+     each connection */
     listenfd = Open_listenfd(port);
     while (1) {
         connfd = Malloc(sizeof(int));
@@ -55,26 +47,30 @@ int main(int argc, char **argv){
     return 0;
 }
 
+/* Handler for SIGPIPE exceptions */
+void pipe_handler(int sig) {
+    return;
+}
+
+/* Determines if the requested method is supported */
 int is_valid_method(int fd, char *method){
     if (strcasecmp(method, "GET")) {
-       clienterror(fd, method, "501", "Not Implemented",
-                "Tiny does not implement this method");
         return 0;
     }
     return 1;
 }
 
+/* Initializes the semophores for use in protecting the cache */
 void thread_safe_init(){
     Sem_init(&mutex, 0, 1); //mutex = 1
     Sem_init(&w, 0, 1); //mutex = 1
 }
 
+/* Handles a connection delegated to it by main. */
 void *client_thread(void *arg){
-
     /* detach thread so we no longer need to manage it */
     if (pthread_detach(pthread_self()))
         unix_error("pthread detach error\n");
-
     int connfd = *((int *)arg);
     int serverfd;
     char host[MAXLINE+1], method[MAXLINE];
@@ -82,16 +78,12 @@ void *client_thread(void *arg){
     int port = 80;
     char request_buffer[MAXLINE*100];
     int gtg = 1;
-
     Free(arg);
+    
     get_header_info(connfd, method, version, host, filename, &port, request_buffer);
     if (gtg && is_valid_method(connfd, method)){
         sigset_t mask;
-        /* if we get an error opening the connection, do nothing */
-        if ((serverfd = open_clientfd(host, port)) < 0) {
-            Close(serverfd);
-            return NULL;
-        }
+        serverfd = Open_clientfd(host, port);
         dll *cacheBlock;
         if ((cacheBlock = lookup(request_buffer)) != NULL){
             // if its in the cache
@@ -105,8 +97,6 @@ void *client_thread(void *arg){
             int responsebuf[64];
             int chunksize;
             send_request_to_server(host, port, request_buffer, serverfd);
-            
-
             Sigemptyset(&mask);
             Sigaddset(&mask, SIGPIPE);
             Sigprocmask(SIG_BLOCK, &mask, NULL);
@@ -134,16 +124,20 @@ void *client_thread(void *arg){
     return NULL;
 }
 
-void get_header_info(int fd, char *method, char *version, char *host, char *filename, int *port, char *request_buffer){
+/* Processes the request sent from the client. Takes the opened file descriptior
+ * and returns all the necessary information from it. 
+ */
+void get_header_info(int fd, char *method, char *version, char *host, 
+    char *filename, int *port, char *request_buffer){
     char buf[MAXLINE], uri[MAXLINE];
     rio_t rio;
-	Rio_readinitb(&rio, fd);
+	
+    Rio_readinitb(&rio, fd);
+    //reads the first line to get the request line
 	Rio_readlineb(&rio, buf, MAXLINE);
-	//reads the first line to get request line
 	sscanf(buf, "%s %s %s", method, uri, version);
     parse_uri(uri, filename, host, port);
     //add default HTTP request info
-    //strncpy(request_buffer, buf, MAXLINE);
     sprintf(request_buffer, "%s http://%s%s HTTP/1.0\r\n", method, host, filename);
     strcat(request_buffer, "Host: ");
     strcat(request_buffer, host);
@@ -155,12 +149,9 @@ void get_header_info(int fd, char *method, char *version, char *host, char *file
     while (1){
 	    Rio_readlineb(&rio, buf, MAXLINE);
 	    if (!strcmp(buf,"\r\n")) break;
-    	// extract the host 
-    	if (strstr(buf, "Host:") != NULL){
-    		//ignore
-    	}
-        else if (strstr(buf, "User-Agent:")==NULL && strstr(buf, "Accept:")==NULL && strstr(buf, "Accept-Encoding:")==NULL){
-            //if key isnt user-agent, accept, or accept-encoding
+        if (strstr(buf, "User-Agent:")==NULL && strstr(buf, "Accept:")==NULL && 
+            strstr(buf, "Accept-Encoding:")==NULL && strstr(buf, "Host:") == NULL){
+            //if key isnt head, user-agent, accept, or accept-encoding
             strcat(request_buffer, buf);
         }
     }
@@ -172,10 +163,7 @@ void send_request_to_server(char *host, int port, char *request_buffer, int serv
     Rio_writen(serverfd, request_buffer, strlen(request_buffer));
 }
 
-/*
- * parse_uri - parse URI into filename and CGI args
- * return 0 if dynamic content, 1 if static
- */
+/* Takes the uri, and returns the filename, host, and port. */
 
 void parse_uri(char *uri, char *filename, char *host, int *port) 
 {
@@ -217,49 +205,4 @@ void parse_uri(char *uri, char *filename, char *host, int *port)
         *port = atoi(portString);
         ptr[0] = '\0';
     }
-	 
-    printf("host: %s, filename: %s, port: %d\n",host, filename, *port);
 }
-/* $end parse_uri */
-
-/*
- * get_filetype - derive file type from file name
- */
-void get_filetype(char *filename, char *filetype) 
-{
-    if (strstr(filename, ".html"))
-	strcpy(filetype, "text/html");
-    else if (strstr(filename, ".gif"))
-	strcpy(filetype, "image/gif");
-    else if (strstr(filename, ".jpg"))
-	strcpy(filetype, "image/jpeg");
-    else
-	strcpy(filetype, "text/plain");
-}  
-
-/*
- * clienterror - returns an error message to the client
- */
-/* $begin clienterror */
-void clienterror(int fd, char *cause, char *errnum, 
-		 char *shortmsg, char *longmsg) 
-{
-    char buf[MAXLINE], body[MAXBUF];
-
-    /* Build the HTTP response body */
-    sprintf(body, "<html><title>Tiny Error</title>");
-    sprintf(body, "%s<body bgcolor=""ffffff"">\r\n", body);
-    sprintf(body, "%s%s: %s\r\n", body, errnum, shortmsg);
-    sprintf(body, "%s<p>%s: %s\r\n", body, longmsg, cause);
-    sprintf(body, "%s<hr><em>The Tiny Web server</em>\r\n", body);
-
-    /* Print the HTTP response */
-    sprintf(buf, "HTTP/1.0 %s %s\r\n", errnum, shortmsg);
-    Rio_writen(fd, buf, strlen(buf));
-    sprintf(buf, "Content-type: text/html\r\n");
-    Rio_writen(fd, buf, strlen(buf));
-    sprintf(buf, "Content-length: %d\r\n\r\n", (int)strlen(body));
-    Rio_writen(fd, buf, strlen(buf));
-    Rio_writen(fd, body, strlen(body));
-}
-/* $end clienterror */

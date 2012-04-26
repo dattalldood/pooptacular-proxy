@@ -2,6 +2,12 @@
 static dll *front = NULL;
 static dll *back = NULL;
 
+typedef struct ins_args {
+    char *req;
+    char *resp;
+    int size;
+} ins_args;
+
 /* Concurrency setup */
 volatile int readcnt = 0;
 
@@ -46,13 +52,38 @@ static void delete (dll *elem) {
     elem_free(elem);
 }
 
+/* checks to see if the given data is present in the cache. does not update */
+static dll *search (char *request) {
+    dll *current = front;
+    while (current)
+        if (current->req && !strcmp(request, current->req))
+            return current;
+        else
+            current = current->next;
+    return NULL;
+}
 
-/* insert a response into the cache. Returns 0 on success or -1 on failure */
-int insert (char *request, char *response, int datasize) {
+/* separate runtime to allow a client to continue receiving requests without
+ * having to wait for the write to go through */
+static void *thread_insert (void *args) {
+
+    /* detach thread so we no longer have to manage it */
+    Pthread_detach(Pthread_self());
+
+    ins_args *info = (ins_args *)args;
+    char *request = info->req;
+    char *response = info->resp;
+    int datasize = info->size;
+
     //Concurrency: insert is a writer
-    printf("poop i cant write\n");
     P(&w);
-    printf("yes i can.,\n");
+
+    /* if data was written while we waited, do nothing */
+    if (search(request)) {
+        V(&w);
+        return NULL;
+    }
+
     /* if there is not enough room in the cache, delete the least recently used
      * list elements until space is avalable */
     while (cachesize + datasize > MAX_CACHE_SIZE){
@@ -60,12 +91,9 @@ int insert (char *request, char *response, int datasize) {
     }
 
     /* we have room in the cache for the object */
-    char *creq = malloc(sizeof(char) * (strlen(request) + 1));
-    char *cresp = malloc(datasize);
-    dll *new = malloc(sizeof(dll));
-    /* mallloc failure */
-    if (!new || !creq || !cresp)
-        return -1;
+    char *creq = Malloc(sizeof(char) * (strlen(request) + 1));
+    char *cresp = Malloc(datasize);
+    dll *new = Malloc(sizeof(dll));
     strcpy(creq, request);
     memcpy(cresp, response, datasize);
     new->req = creq;
@@ -85,6 +113,31 @@ int insert (char *request, char *response, int datasize) {
     cachesize += datasize;
 
     V(&w);
+    return NULL;
+}
+
+/* packs the arguments for insert into one structure for passage to 
+ * thread_insert */
+static ins_args *pack (char *request, char *response, int datasize) {
+    ins_args *args = Malloc(sizeof(ins_args));
+    args->req = request;
+    args->resp = response;
+    args->size = datasize;
+    return args;
+}
+
+/* insert a response into the cache. Returns 0 on success or -1 on failure */
+int insert (char *request, char *response, int datasize) {
+
+    pthread_t tid;
+
+    /* if our data is already in the cache do not write */
+    if (lookup(request))
+        return 0;
+    
+    Pthread_create(&tid, NULL, thread_insert,
+                   pack(request, response, datasize));
+
     /* success */
     return 0;
 }

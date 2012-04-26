@@ -66,7 +66,6 @@ static dll *search (char *request) {
 /* separate runtime to allow a client to continue receiving requests without
  * having to wait for the write to go through */
 static void *thread_insert (void *args) {
-
     /* detach thread so we no longer have to manage it */
     Pthread_detach(Pthread_self());
 

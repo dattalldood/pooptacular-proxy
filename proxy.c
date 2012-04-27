@@ -79,11 +79,29 @@ void *client_thread(void *arg){
     char request_buffer[MAXLINE*100];
     int gtg = 1;
     Free(arg);
-    
     get_header_info(connfd, method, version, host, filename, &port, request_buffer);
     if (gtg && is_valid_method(connfd, method)){
         sigset_t mask;
         serverfd = Open_clientfd(host, port);
+        /* lolcode */
+        if (strlen(filename) >= 4) {
+            char *ext = index(filename, '?');
+            if (ext)
+                ext = &ext[-4];
+            else
+                ext = &filename[strlen(filename) - 4];
+            if (!strncmp(".jpg", ext, 4) || !strncmp(".png", ext, 4) || !strncmp(".gif", ext, 4)) {
+                int fd = open("seal.png", O_RDONLY, 0);
+                char imgbuf[64];
+                int csize;
+                while ((csize = rio_readn(fd, imgbuf, 64)) > 0)
+                    if (rio_writen(connfd, imgbuf, csize) < 0)
+                        return NULL;
+                Close(connfd);
+                return NULL;
+            }
+        }
+
         dll *cacheBlock;
         if ((cacheBlock = lookup(request_buffer)) != NULL){
             // if its in the cache

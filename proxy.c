@@ -71,6 +71,7 @@ void *client_thread(void *arg){
     /* detach thread so we no longer need to manage it */
     if (pthread_detach(pthread_self()))
         unix_error("pthread detach error\n");
+
     int connfd = *((int *)arg);
     int serverfd;
     char host[MAXLINE+1], method[MAXLINE];
@@ -79,14 +80,22 @@ void *client_thread(void *arg){
     char request_buffer[MAXLINE*100];
     int gtg = 1;
     Free(arg);
+
     get_header_info(connfd, method, version, host, filename, &port, request_buffer);
-    if (gtg && is_valid_method(connfd, method)){
+
+    /* make sure we have a GET request */
+    if (is_valid_method(connfd, method)){
         sigset_t mask;
-        serverfd = Open_clientfd(host, port);
-        /* lolcode */
+        /* if open server file descripter */
+        if ((serverfd = open_clientfd(host, port)) < 0) {
+            Close(connfd);
+            return NULL;
+        }
+        /* lolcode :D
         if (strlen(filename) >= 4) {
             char *ext = index(filename, '?');
-            if (ext)
+            if (ext && filename[0] != '?' && filename[1] != '?'
+                && filename[2] != '?' && filename[3] != '?')
                 ext = &ext[-4];
             else
                 ext = &filename[strlen(filename) - 4];
@@ -100,7 +109,7 @@ void *client_thread(void *arg){
                 Close(connfd);
                 return NULL;
             }
-        }
+        }*/
 
         dll *cacheBlock;
         if ((cacheBlock = lookup(request_buffer)) != NULL){
@@ -115,9 +124,11 @@ void *client_thread(void *arg){
             int responsebuf[64];
             int chunksize;
             send_request_to_server(host, port, request_buffer, serverfd);
+            /* block SIGPIPE signals */
             Sigemptyset(&mask);
             Sigaddset(&mask, SIGPIPE);
             Sigprocmask(SIG_BLOCK, &mask, NULL);
+            /* initiate read-write sequence */
             while ((chunksize = rio_readn(serverfd, responsebuf, 64)) > 0) {
                 if (datasize+chunksize <= MAX_OBJECT_SIZE){
                     memcpy(cachebuf+datasize, responsebuf, chunksize);    
